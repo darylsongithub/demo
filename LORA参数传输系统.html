@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>云边端协同传输展示平台</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            padding: 14px 18px;
+            color: #333;
+            font-size: 16px;
+        }
+
+        .container { max-width: 1440px; margin: 0 auto; }
+
+        /* ===== 标题 ===== */
+        .page-header { text-align: center; margin-bottom: 12px; }
+        .page-header h1 { font-size: 32px; color: #fff; letter-spacing: 2px; margin-bottom: 4px; }
+        .page-header p  { color: #a0b4cc; font-size: 15px; }
+
+        /* ===== 架构卡片 ===== */
+        .arch-card {
+            background: #fff;
+            border-radius: 14px;
+            padding: 18px 28px 16px;
+            margin-bottom: 13px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+        }
+        .arch-card h2 {
+            font-size: 14px; color: #aaa; margin-bottom: 14px;
+            font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+        }
+        .arch-diagram {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* ===== 节点 ===== */
+        .node {
+            display: flex; flex-direction: column; align-items: center;
+            gap: 10px; min-width: 185px;
+            transition: opacity 0.4s ease;
+        }
+        .node.dimmed { opacity: 0.25; filter: grayscale(0.8); }
+
+        .node-icon-wrap { position: relative; width: 100px; height: 100px; }
+        .node-icon {
+            width: 100px; height: 100px; border-radius: 18px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 44px; border: 3px solid #ddd; background: #f8f9fa;
+            transition: all 0.35s ease;
+        }
+        .node-icon img { width: 64px; height: 64px; object-fit: contain; }
+        .node-icon.cloud    { border-color: #e07b39; background: #fff8f3; }
+        .node-icon.edge     { border-color: #e07b39; background: #fff8f3; }
+        .node-icon.terminal { border-color: #1a9b8a; background: #f0faf8; }
+
+        /* 高亮状态 */
+        .node-icon.hl-distill {
+            border-color: #e07b39 !important;
+            box-shadow: 0 0 0 5px rgba(224,123,57,0.18), 0 0 24px rgba(224,123,57,0.35);
+            transform: scale(1.07);
+        }
+        .node-icon.hl-lora {
+            border-color: #1a9b8a !important;
+            box-shadow: 0 0 0 5px rgba(26,155,138,0.18), 0 0 24px rgba(26,155,138,0.35);
+            transform: scale(1.07);
+        }
+
+        .node-pulse {
+            position: absolute; top: -5px; left: -5px; right: -5px; bottom: -5px;
+            border-radius: 22px; border: 2px solid transparent; opacity: 0; pointer-events: none;
+        }
+        .node-pulse.active { opacity: 1; animation: pulse-ring 1.6s ease-out infinite; }
+        @keyframes pulse-ring {
+            0%   { transform: scale(0.94); opacity: 0.7; }
+            70%  { transform: scale(1.1);  opacity: 0; }
+            100% { transform: scale(1.1);  opacity: 0; }
+        }
+
+        .node-label { font-weight: 700; font-size: 20px; color: #222; }
+        .node-btns  { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+        /* ===== 箭头列 ===== */
+        .arrow-col {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; width: 200px; gap: 14px;
+            padding-bottom: 74px;
+            transition: opacity 0.4s ease;
+        }
+        .arrow-col.dimmed { opacity: 0.12; }
+
+        .arrow-track {
+            position: relative; width: 100%;
+            display: flex; flex-direction: column; align-items: center; gap: 7px;
+        }
+        .arrow-label {
+            font-size: 14px; font-weight: 700; padding: 4px 12px;
+            border-radius: 10px; white-space: nowrap;
+        }
+        .arrow-label.distill { background: #fff1e6; color: #c05e1a; border: 1px solid #f0c090; }
+        .arrow-label.lora    { background: #e6f7f5; color: #0f7c6e; border: 1px solid #80d0c4; }
+
+        .arrow-row { display: flex; align-items: center; width: 100%; }
+        .arrow-line {
+            position: relative; height: 15px; flex: 1;
+            border-radius: 8px; overflow: hidden;
+        }
+        .arrow-line-bg { position: absolute; inset: 0; border-radius: 8px; }
+        .arrow-line.distill .arrow-line-bg { background: linear-gradient(90deg, #f5a060, #e07b39); }
+        .arrow-line.lora    .arrow-line-bg { background: linear-gradient(90deg, #40c9b8, #1a9b8a); }
+
+        .arrow-flow {
+            position: absolute; top: 0; left: -60%; width: 60%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+            border-radius: 8px; opacity: 0;
+        }
+        .arrow-line.flowing .arrow-flow { opacity: 1; animation: flow-move 0.9s linear infinite; }
+        @keyframes flow-move { 0% { left: -60%; } 100% { left: 100%; } }
+
+        .arrow-head { width: 0; height: 0; border-top: 9px solid transparent; border-bottom: 9px solid transparent; }
+        .arrow-head.distill { border-left: 16px solid #e07b39; }
+        .arrow-head.lora    { border-left: 16px solid #1a9b8a; }
+
+        /* ===== 按钮 ===== */
+        .btn {
+            padding: 8px 18px; border: none; border-radius: 7px;
+            font-size: 15px; font-weight: 700; cursor: pointer;
+            transition: all 0.2s ease; white-space: nowrap;
+        }
+        .btn:hover     { transform: translateY(-1px); filter: brightness(1.08); }
+        .btn:disabled  { opacity: 0.45; cursor: not-allowed; transform: none; filter: none; }
+        .btn-check     { background: #f0f0f0; color: #555; border: 1px solid #ddd; }
+        .btn-check:hover { background: #e4e4e4; }
+        .btn-update    { background: linear-gradient(135deg, #e07b39, #c05e1a); color: #fff; }
+        .btn-update-lora { background: linear-gradient(135deg, #40c9b8, #1a9b8a); color: #fff; }
+
+        /* ===== 双面板 ===== */
+        .panels-row {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 13px; margin-bottom: 13px;
+        }
+        .panel-card {
+            background: #fff; border-radius: 14px; padding: 18px 22px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+        }
+        .panel-header {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid #f0f0f0;
+        }
+        .panel-badge {
+            padding: 3px 12px; border-radius: 12px;
+            font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+        }
+        .panel-badge.offline { background: #fff1e6; color: #c05e1a; border: 1px solid #f0c090; }
+        .panel-badge.online  { background: #e6f7f5; color: #0f7c6e; border: 1px solid #80d0c4; }
+        .panel-title { font-size: 20px; font-weight: 700; color: #222; }
+
+        /* 路径选择 */
+        .path-selector { display: flex; gap: 8px; margin-bottom: 12px; }
+        .path-btn {
+            flex: 1; padding: 9px 12px; border-radius: 8px; border: 2px solid #eee;
+            background: #f8f8f8; font-size: 14px; font-weight: 700;
+            cursor: pointer; text-align: center; transition: all 0.2s; color: #999;
+        }
+        .path-btn.active.distill-theme { border-color: #e07b39; background: #fff1e6; color: #c05e1a; }
+        .path-btn.active.lora-theme    { border-color: #1a9b8a; background: #e6f7f5; color: #0f7c6e; }
+        .path-btn.fixed                { cursor: default; }
+
+        /* 拖拽区 */
+        .drop-zone {
+            border: 2.5px dashed #ddd; border-radius: 10px; padding: 12px 16px;
+            text-align: center; cursor: pointer; position: relative;
+            transition: all 0.25s; margin-bottom: 12px;
+        }
+        .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        .drop-zone:hover               { border-color: #bbb; background: #fafafa; }
+        .drop-zone.drag-over           { background: #f0faf8; border-color: #1a9b8a; }
+        .drop-zone.distill-zone        { border-color: #f0c090; }
+        .drop-zone.distill-zone:hover  { border-color: #e07b39; background: #fff8f3; }
+        .drop-zone.distill-zone.drag-over { background: #fff1e6; border-color: #e07b39; }
+        .drop-zone-icon { font-size: 26px; margin-bottom: 4px; }
+        .drop-zone-text { font-size: 15px; color: #555; font-weight: 700; }
+        .drop-zone-sub  { font-size: 13px; color: #aaa; margin-top: 3px; }
+
+        /* 进度区 */
+        .progress-device-row {
+            display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+        }
+        .device-label {
+            font-size: 15px; font-weight: 700; color: #666;
+            white-space: nowrap; min-width: 72px;
+        }
+        .progress-track {
+            flex: 1; height: 18px; background: #eee;
+            border-radius: 9px; overflow: hidden; position: relative;
+        }
+        .progress-fill {
+            height: 100%; width: 0%; border-radius: 9px;
+            transition: width 0.2s ease; position: relative; overflow: hidden;
+        }
+        .progress-fill::after {
+            content: ''; position: absolute; inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            animation: shimmer 1.8s infinite;
+        }
+        @keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(200%); } }
+        .progress-fill.distill { background: linear-gradient(90deg, #f5a060, #e07b39); }
+        .progress-fill.lora    { background: linear-gradient(90deg, #40c9b8, #1a9b8a); }
+
+        .progress-pct {
+            font-size: 16px; font-weight: 700; color: #555;
+            min-width: 42px; text-align: right;
+        }
+        .progress-status-icon {
+            width: 30px; height: 30px; border-radius: 7px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; font-weight: 700; flex-shrink: 0;
+            border: 1.5px solid #eee; color: #ccc; background: #fafafa;
+        }
+        .progress-status-icon.done  { border-color: #4CAF50; color: #4CAF50; background: #f1f8e9; }
+        .progress-status-icon.error { border-color: #f44336; color: #f44336; background: #ffebee; }
+
+        /* 传输统计行 */
+        .transmission-stats {
+            display: flex; gap: 0; justify-content: space-between;
+            background: #f8f8f8; border-radius: 9px; padding: 10px 18px;
+            margin-bottom: 12px;
+        }
+        .stat-item { display: flex; flex-direction: column; gap: 3px; }
+        .stat-label { font-size: 13px; color: #aaa; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-value { font-size: 20px; font-weight: 700; color: #444; }
+        .stat-value.distill { color: #e07b39; }
+        .stat-value.lora    { color: #1a9b8a; }
+
+        /* 启动按钮 */
+        .start-btn {
+            width: 100%; padding: 13px; border: none; border-radius: 9px;
+            font-size: 17px; font-weight: 700; cursor: pointer;
+            transition: all 0.25s; letter-spacing: 0.5px;
+        }
+        .start-btn:hover    { transform: translateY(-1px); filter: brightness(1.08); }
+        .start-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; filter: none; }
+        .start-btn.distill  { background: linear-gradient(135deg, #f5a060, #e07b39); color: #fff; }
+        .start-btn.lora     { background: linear-gradient(135deg, #40c9b8, #1a9b8a); color: #fff; }
+
+        /* ===== 日志 ===== */
+        .log-card { background: #1a1a2e; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.25); }
+        .log-header {
+            padding: 10px 20px; background: #0f0f1e;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .log-header span { font-size: 14px; color: #7a8a9a; font-family: monospace; }
+        .log-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .log-dot.red    { background: #ff5f57; }
+        .log-dot.yellow { background: #febc2e; }
+        .log-dot.green  { background: #28c840; }
+        .log-body {
+            padding: 12px 20px; height: 230px; overflow-y: auto;
+            font-family: 'Courier New', monospace; font-size: 14px; line-height: 1.75;
+        }
+        .log-entry { display: flex; gap: 8px; align-items: baseline; }
+        .log-ts    { color: #4a5a6a; flex-shrink: 0; font-size: 13px; }
+        .log-tag   {
+            flex-shrink: 0; padding: 1px 6px; border-radius: 4px;
+            font-size: 11px; font-weight: 700; align-self: center;
+        }
+        .log-tag.sys     { background: #2a3a4a; color: #6a8aa8; }
+        .log-tag.distill { background: #3a2510; color: #e07b39; }
+        .log-tag.lora    { background: #0a2420; color: #1a9b8a; }
+        .log-msg         { color: #c8d8e8; }
+        .log-msg.distill { color: #f5b070; }
+        .log-msg.lora    { color: #50d4c4; }
+        .log-msg.success { color: #68d868; }
+        .log-msg.error   { color: #f07070; }
+
+        /* ===== 弹窗 ===== */
+        .modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55); z-index: 999;
+            align-items: center; justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-box {
+            background: #fff; border-radius: 14px; padding: 28px 30px;
+            width: 420px; max-width: 92vw; max-height: 80vh; overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .modal-box h3 { font-size: 18px; margin-bottom: 18px; color: #222; }
+        .modal-info-row {
+            display: flex; justify-content: space-between;
+            padding: 9px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px;
+        }
+        .modal-info-row:last-of-type { border-bottom: none; }
+        .modal-info-label { color: #888; }
+        .modal-info-value { font-weight: 700; color: #333; }
+        .modal-info-value.online  { color: #1a9b8a; }
+        .modal-info-value.offline { color: #e05555; }
+
+        .modal-section-title {
+            font-size: 12px; font-weight: 700; color: #aaa; text-transform: uppercase;
+            letter-spacing: 1px; margin: 18px 0 8px; padding-top: 14px;
+            border-top: 2px solid #f0f0f0;
+        }
+        .history-record {
+            padding: 9px 12px; border-radius: 8px; margin-bottom: 7px; font-size: 13px;
+        }
+        .history-record.distill-rec { background: #fff8f3; border-left: 3px solid #e07b39; }
+        .history-record.lora-rec    { background: #f0faf8; border-left: 3px solid #1a9b8a; }
+        .history-record.update-rec  { background: #f3f8ff; border-left: 3px solid #4a90e2; }
+        .history-record .rec-action { font-weight: 700; color: #333; margin-bottom: 2px; }
+        .history-record .rec-sub    { color: #999; font-size: 12px; }
+        .history-empty { color: #bbb; font-size: 14px; padding: 10px 0; text-align: center; }
+
+        /* 更新模型弹窗 */
+        .update-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 14px; border-radius: 10px; margin-bottom: 8px; border: 1.5px solid #eee;
+        }
+        .update-item.distill-item { background: #fff8f3; border-color: #f0c090; }
+        .update-item.lora-item    { background: #f0faf8; border-color: #80d0c4; }
+        .update-item-info .item-title { font-size: 14px; font-weight: 700; color: #333; }
+        .update-item-info .item-sub   { font-size: 12px; color: #999; margin-top: 2px; }
+        .btn-apply {
+            padding: 6px 14px; border: none; border-radius: 7px;
+            font-size: 13px; font-weight: 700; cursor: pointer;
+            transition: all 0.2s; white-space: nowrap;
+        }
+        .btn-apply.distill-apply { background: linear-gradient(135deg, #f5a060, #e07b39); color: #fff; }
+        .btn-apply.lora-apply    { background: linear-gradient(135deg, #40c9b8, #1a9b8a); color: #fff; }
+        .btn-apply:hover         { filter: brightness(1.08); transform: translateY(-1px); }
+        .btn-apply:disabled      { opacity: 0.45; cursor: not-allowed; transform: none; filter: none; }
+
+        /* 内联loading */
+        .inline-progress { margin: 14px 0; }
+        .inline-progress-bar {
+            width: 100%; height: 10px; background: #eee; border-radius: 5px; overflow: hidden;
+        }
+        .inline-progress-fill {
+            height: 100%; width: 0%; border-radius: 5px;
+            background: linear-gradient(90deg, #4a90e2, #1a6ac9);
+            transition: width 0.3s ease;
+        }
+        .inline-progress-text { font-size: 13px; color: #666; margin-top: 6px; text-align: center; }
+
+        .modal-close {
+            margin-top: 20px; width: 100%; padding: 10px; border: none;
+            border-radius: 9px; background: #f0f0f0; font-size: 14px;
+            font-weight: 700; cursor: pointer; color: #555;
+        }
+        .modal-close:hover { background: #e4e4e4; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <!-- 标题 -->
+    <div class="page-header">
+        <h1>云边端协同传输展示平台</h1>
+        <!-- <p>蒸馏数据离线传输 &nbsp;|&nbsp; LoRA 参数在线更新 &nbsp;|&nbsp; 云侧 · 边缘侧 · 端侧</p> -->
+    </div>
+
+    <!-- 架构示意图 -->
+    <div class="arch-card">
+        <h2>系统架构示意图</h2>
+        <div class="arch-diagram">
+
+            <!-- 云侧节点 -->
+            <div class="node" id="node-cloud">
+                <div class="node-icon-wrap">
+                    <div class="node-icon cloud" id="icon-cloud">☁️</div>
+                    <div class="node-pulse" id="pulse-cloud" style="border-color:#e07b39;"></div>
+                </div>
+                <div class="node-label">云侧模型</div>
+                <div class="node-btns">
+                    <button class="btn btn-check" onclick="checkStatus('cloud')">检查状态</button>
+                </div>
+            </div>
+
+            <!-- 箭头：云侧 → 边缘侧 -->
+            <div class="arrow-col" id="arrowcol-ce">
+                <div class="arrow-track">
+                    <div class="arrow-label distill">蒸馏数据（离线）</div>
+                    <div class="arrow-row">
+                        <div class="arrow-line distill" id="arrow-cloud-edge">
+                            <div class="arrow-line-bg"></div>
+                            <div class="arrow-flow"></div>
+                        </div>
+                        <div class="arrow-head distill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 边缘侧节点 -->
+            <div class="node" id="node-edge">
+                <div class="node-icon-wrap">
+                    <div class="node-icon edge" id="icon-edge">💻</div>
+                    <div class="node-pulse" id="pulse-edge" style="border-color:#e07b39;"></div>
+                </div>
+                <div class="node-label">边缘侧模型</div>
+                <div class="node-btns">
+                    <button class="btn btn-check"   onclick="checkStatus('edge')">检查状态</button>
+                    <button class="btn btn-update"  onclick="openUpdateModal('edge')">更新模型</button>
+                </div>
+            </div>
+
+            <!-- 箭头：边缘侧 → 端侧（双条） -->
+            <div class="arrow-col" id="arrowcol-et">
+                <div class="arrow-track" style="margin-bottom:10px;">
+                    <div class="arrow-label distill">蒸馏数据（离线）</div>
+                    <div class="arrow-row">
+                        <div class="arrow-line distill" id="arrow-edge-terminal-d">
+                            <div class="arrow-line-bg"></div>
+                            <div class="arrow-flow"></div>
+                        </div>
+                        <div class="arrow-head distill"></div>
+                    </div>
+                </div>
+                <div class="arrow-track">
+                    <div class="arrow-label lora">LoRA 参数（在线）</div>
+                    <div class="arrow-row">
+                        <div class="arrow-line lora" id="arrow-edge-terminal-l">
+                            <div class="arrow-line-bg"></div>
+                            <div class="arrow-flow"></div>
+                        </div>
+                        <div class="arrow-head lora"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 端侧节点 -->
+            <div class="node" id="node-terminal">
+                <div class="node-icon-wrap">
+                    <div class="node-icon terminal" id="icon-terminal">
+                        <img src="image.png" alt="UAV">
+                    </div>
+                    <div class="node-pulse" id="pulse-terminal" style="border-color:#1a9b8a;"></div>
+                </div>
+                <div class="node-label">端侧模型</div>
+                <div class="node-btns">
+                    <button class="btn btn-check"       onclick="checkStatus('terminal')">检查状态</button>
+                    <button class="btn btn-update-lora" onclick="openUpdateModal('terminal')">更新模型</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 双面板 -->
+    <div class="panels-row">
+
+        <!-- 左：蒸馏数据传输 -->
+        <div class="panel-card">
+            <div class="panel-header">
+                <span class="panel-badge offline">离线训练</span>
+                <div class="panel-title">蒸馏数据传输</div>
+            </div>
+
+            <div class="path-selector">
+                <div class="path-btn distill-theme active" id="dpath-ce" onclick="selectDistillPath('cloud-edge')">
+                    ☁️ 云侧 → 边缘侧
+                </div>
+                <div class="path-btn distill-theme" id="dpath-et" onclick="selectDistillPath('edge-terminal')">
+                    💻 边缘侧 → 端侧
+                </div>
+            </div>
+
+            <div class="drop-zone distill-zone" id="distillDrop">
+                <input type="file" id="distillFile" multiple onchange="handleDistillFiles(this.files)">
+                <div class="drop-zone-icon">📂</div>
+                <div class="drop-zone-text">上传蒸馏数据包</div>
+                <div class="drop-zone-sub" id="distillFileInfo">点击选择或拖拽文件至此处（支持多文件）</div>
+            </div>
+
+            <div class="progress-device-row">
+                <div class="device-label" id="distillDeviceLabel">接收方</div>
+                <div class="progress-track">
+                    <div class="progress-fill distill" id="distill-fill"></div>
+                </div>
+                <div class="progress-pct" id="distill-pct">0%</div>
+                <div class="progress-status-icon" id="distill-status">·</div>
+            </div>
+
+            <div class="transmission-stats">
+                <div class="stat-item">
+                    <div class="stat-label">速率</div>
+                    <div class="stat-value distill" id="distillSpeed">— MB/s</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">已传输</div>
+                    <div class="stat-value" id="distillTransferred">—</div>
+                </div>
+                <div class="stat-item" style="text-align:right;">
+                    <div class="stat-label">预计剩余</div>
+                    <div class="stat-value" id="distillEta">—</div>
+                </div>
+            </div>
+
+            <button class="start-btn distill" id="distillStartBtn" onclick="startDistill()" disabled>
+                开始传输蒸馏数据
+            </button>
+        </div>
+
+        <!-- 右：LoRA 参数传输 -->
+        <div class="panel-card">
+            <div class="panel-header">
+                <span class="panel-badge online">在线更新</span>
+                <div class="panel-title">LoRA 参数传输</div>
+            </div>
+
+            <div class="path-selector">
+                <div class="path-btn lora-theme active fixed">
+                    💻 边缘侧 → 端侧（固定）
+                </div>
+            </div>
+
+            <div class="drop-zone" id="loraDrop">
+                <input type="file" id="loraFile" multiple onchange="handleLoraFiles(this.files)">
+                <div class="drop-zone-icon">⚡</div>
+                <div class="drop-zone-text">上传 LoRA 参数文件</div>
+                <div class="drop-zone-sub" id="loraFileInfo">点击选择或拖拽 .bin / .safetensors 文件</div>
+            </div>
+
+            <div class="progress-device-row">
+                <div class="device-label">端侧</div>
+                <div class="progress-track">
+                    <div class="progress-fill lora" id="lora-fill"></div>
+                </div>
+                <div class="progress-pct" id="lora-pct">0%</div>
+                <div class="progress-status-icon" id="lora-status">·</div>
+            </div>
+
+            <div class="transmission-stats">
+                <div class="stat-item">
+                    <div class="stat-label">速率</div>
+                    <div class="stat-value lora" id="loraSpeed">— MB/s</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">已传输</div>
+                    <div class="stat-value" id="loraTransferred">—</div>
+                </div>
+                <div class="stat-item" style="text-align:right;">
+                    <div class="stat-label">预计剩余</div>
+                    <div class="stat-value" id="loraEta">—</div>
+                </div>
+            </div>
+
+            <button class="start-btn lora" id="loraStartBtn" onclick="startLora()" disabled>
+                开始传输 LoRA 参数
+            </button>
+        </div>
+    </div>
+
+    <!-- 日志 -->
+    <div class="log-card">
+        <div class="log-header">
+            <div class="log-dot red"></div>
+            <div class="log-dot yellow"></div>
+            <div class="log-dot green"></div>
+            <span style="margin-left:6px;">系统日志 — 云边端协同传输展示平台</span>
+        </div>
+        <div class="log-body" id="logBody"></div>
+    </div>
+
+</div><!-- /container -->
+
+<!-- 弹窗：检查状态 -->
+<div class="modal-overlay" id="statusModal">
+    <div class="modal-box">
+        <h3 id="statusModalTitle">状态检查</h3>
+        <div id="statusModalContent"></div>
+        <button class="modal-close" onclick="closeModal('statusModal')">关闭</button>
+    </div>
+</div>
+
+<!-- 弹窗：更新模型 -->
+<div class="modal-overlay" id="updateModal">
+    <div class="modal-box">
+        <h3 id="updateModalTitle">更新模型</h3>
+        <div id="updateModalContent"></div>
+        <button class="modal-close" id="updateModalClose" onclick="closeModal('updateModal')">关闭</button>
+    </div>
+</div>
+
+<script>
+/* ==========================================
+   全局状态
+========================================== */
+let distillPath       = 'cloud-edge';
+let distillFileSize   = 0;
+let loraFileSize      = 0;
+let distillTransmitting = false;
+let loraTransmitting    = false;
+
+// 操作历史：每侧独立
+const opHistory = { cloud: [], edge: [], terminal: [] };
+
+// 待应用的更新数据（传输完成后入队，"更新模型"后出队）
+const pendingUpdates = { edge: [], terminal: [] };
+
+// 模型规格
+const MODEL_SPECS = {
+    cloud:    { params: '≥ 30B',     device: 'A100 服务器',         arch: 'Qwen3-32B' },
+    edge:     { params: '2B ~ 10B',  device: 'RTX 5090 笔记本',         arch: 'Qwen3-7B'   },
+    terminal: { params: '< 2B',      device: 'UAV 搭载 NVIDIA Jetson',   arch: 'Qwen3-1.5B' }
+};
+
+/* ==========================================
+   路径切换
+========================================== */
+function selectDistillPath(path) {
+    distillPath = path;
+    document.getElementById('dpath-ce').classList.toggle('active', path === 'cloud-edge');
+    document.getElementById('dpath-et').classList.toggle('active', path === 'edge-terminal');
+    const label = path === 'cloud-edge' ? '边缘侧' : '端侧';
+    document.getElementById('distillDeviceLabel').textContent = label;
+}
+
+/* ==========================================
+   文件处理
+========================================== */
+function handleDistillFiles(files) {
+    if (!files.length) return;
+    distillFileSize = Array.from(files).reduce((s, f) => s + f.size, 0);
+    const mb = (distillFileSize / (1024 * 1024)).toFixed(2);
+    document.getElementById('distillFileInfo').textContent = `已选 ${files.length} 个文件，共 ${mb} MB`;
+    document.getElementById('distillStartBtn').disabled = false;
+    addLog('distill', `已选择蒸馏数据包：${files.length} 个文件，共 ${mb} MB`);
+}
+
+function handleLoraFiles(files) {
+    if (!files.length) return;
+    loraFileSize = Array.from(files).reduce((s, f) => s + f.size, 0);
+    const mb = (loraFileSize / (1024 * 1024)).toFixed(2);
+    document.getElementById('loraFileInfo').textContent = `已选 ${files.length} 个文件，共 ${mb} MB`;
+    document.getElementById('loraStartBtn').disabled = false;
+    addLog('lora', `已选择 LoRA 参数文件：${files.length} 个文件，共 ${mb} MB`);
+}
+
+// 拖拽
+['distillDrop', 'loraDrop'].forEach((id, i) => {
+    const zone = document.getElementById(id);
+    const handler = i === 0 ? handleDistillFiles : handleLoraFiles;
+    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', ()  => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+        handler(e.dataTransfer.files);
+    });
+});
+
+/* ==========================================
+   传输启动
+========================================== */
+function startDistill() {
+    if (distillTransmitting) return;
+    distillTransmitting = true;
+
+    const pathLabels = { 'cloud-edge': '云侧 → 边缘侧', 'edge-terminal': '边缘侧 → 端侧' };
+    const pathLabel  = pathLabels[distillPath];
+    const sender     = distillPath === 'cloud-edge' ? 'cloud' : 'edge';
+    const receiver   = distillPath === 'cloud-edge' ? 'edge'  : 'terminal';
+
+    addLog('distill', `开始蒸馏数据传输 [${pathLabel}]`);
+    document.getElementById('distillStartBtn').disabled = true;
+
+    // 架构图高亮
+    setArchHighlight({ nodes: [sender, receiver], arrowCols: [distillPath === 'cloud-edge' ? 'ce' : 'et'], type: 'distill' });
+
+    // 箭头流动
+    const arrowId = distillPath === 'cloud-edge' ? 'arrow-cloud-edge' : 'arrow-edge-terminal-d';
+    setArrowFlowing(arrowId, true);
+
+    // 云侧→边缘侧: 100 Mbit/s = 12.5 MB/s；边缘侧→端侧: 64 Mbit/s = 8 MB/s
+    const baseSpeed = distillPath === 'cloud-edge' ? 12.5 : 8;
+
+    runTransmission('distill', distillFileSize, baseSpeed, () => {
+        distillTransmitting = false;
+        setArrowFlowing(arrowId, false);
+        clearArchHighlight();
+        addLog('distill', `蒸馏数据传输完成 [${pathLabel}]`, 'success');
+
+        const rec = {
+            type: 'distill', path: pathLabel,
+            time: new Date().toLocaleString(),
+            size: (distillFileSize / (1024 * 1024)).toFixed(2) + ' MB',
+            version: 'v' + (2 + Math.random()).toFixed(1) + '.' + Math.floor(Math.random() * 9)
+        };
+        opHistory[sender].push({ action: '发起蒸馏传输', ...rec });
+        opHistory[receiver].push({ action: '接收蒸馏数据', ...rec });
+        pendingUpdates[receiver].push({ ...rec, id: Date.now() });
+
+        document.getElementById('distillStartBtn').disabled = false;
+    });
+}
+
+function startLora() {
+    if (loraTransmitting) return;
+    loraTransmitting = true;
+
+    addLog('lora', '开始 LoRA 参数在线传输 [边缘侧 → 端侧]');
+    document.getElementById('loraStartBtn').disabled = true;
+
+    setArchHighlight({ nodes: ['edge', 'terminal'], arrowCols: ['et'], type: 'lora' });
+    setArrowFlowing('arrow-edge-terminal-l', true);
+
+    // 边缘侧→端侧: 30 Mbit/s = 3.75 MB/s
+    const baseSpeed = 3.75;
+
+    runTransmission('lora', loraFileSize, baseSpeed, () => {
+        loraTransmitting = false;
+        setArrowFlowing('arrow-edge-terminal-l', false);
+        clearArchHighlight();
+        addLog('lora', 'LoRA 参数传输完成，端侧模型在线更新就绪', 'success');
+
+        const rec = {
+            type: 'lora', path: '边缘侧 → 端侧',
+            time: new Date().toLocaleString(),
+            size: (loraFileSize / (1024 * 1024)).toFixed(2) + ' MB',
+            version: 'LoRA-r' + [4, 8, 16, 32][Math.floor(Math.random() * 4)]
+        };
+        opHistory.edge.push({ action: '发送 LoRA 参数', ...rec });
+        opHistory.terminal.push({ action: '接收 LoRA 参数', ...rec });
+        pendingUpdates.terminal.push({ ...rec, id: Date.now() });
+
+        document.getElementById('loraStartBtn').disabled = false;
+    });
+}
+
+/* ==========================================
+   传输仿真核心
+========================================== */
+function runTransmission(type, totalSize, baseSpeedMBs, onDone) {
+    const fillEl   = document.getElementById(`${type}-fill`);
+    const statusEl = document.getElementById(`${type}-status`);
+    const pctEl    = document.getElementById(`${type}-pct`);
+    const speedEl  = document.getElementById(type === 'distill' ? 'distillSpeed'      : 'loraSpeed');
+    const transEl  = document.getElementById(type === 'distill' ? 'distillTransferred' : 'loraTransferred');
+    const etaEl    = document.getElementById(type === 'distill' ? 'distillEta'         : 'loraEta');
+
+    fillEl.style.width   = '0%';
+    statusEl.className   = 'progress-status-icon';
+    statusEl.textContent = '·';
+
+    // 速率固定，时长由文件大小自适应
+    // 对极小文件（< 10MB）按 10MB 计算，保证动画至少有足够可见时间
+    const totalMB    = Math.max(totalSize / (1024 * 1024), 0.01);
+    const simMB      = Math.max(totalMB, 10);          // 用于计算时长的虚拟最低量
+    const durationMs = (simMB / baseSpeedMBs) * 1000;  // 时长 = 数据量 ÷ 速率
+
+    let progress     = 0;
+    let displaySpeed = baseSpeedMBs;   // 显示速率，每300ms轻微抖动，但基准不变
+    const inc        = 100 / (durationMs / 50);
+    const startTime  = Date.now();
+
+    // 速率抖动：±10% 随机波动，视觉上模拟真实网络
+    const fluctTimer = setInterval(() => {
+        displaySpeed = baseSpeedMBs * (0.90 + Math.random() * 0.20);
+    }, 300);
+
+    const iv = setInterval(() => {
+        progress = Math.min(progress + inc, 100);
+        const pct           = Math.round(progress);
+        const transferredMB = totalMB * progress / 100;
+        const remainingMB   = totalMB - transferredMB;
+        const etaSec        = Math.round(remainingMB / baseSpeedMBs);
+
+        fillEl.style.width  = progress + '%';
+        pctEl.textContent   = pct + '%';
+        speedEl.textContent = displaySpeed.toFixed(2) + ' MB/s';
+        transEl.textContent = transferredMB.toFixed(2) + ' / ' + totalMB.toFixed(2) + ' MB';
+        etaEl.textContent   = etaSec > 0 ? etaSec + ' 秒' : '即将完成';
+
+        if (progress >= 100) {
+            clearInterval(iv);
+            clearInterval(fluctTimer);
+            const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+            statusEl.className   = 'progress-status-icon done';
+            statusEl.textContent = '✓';
+            speedEl.textContent  = baseSpeedMBs.toFixed(2) + ' MB/s';
+            transEl.textContent  = totalMB.toFixed(2) + ' / ' + totalMB.toFixed(2) + ' MB';
+            etaEl.textContent    = `用时 ${elapsedSec}s`;
+            onDone();
+        }
+    }, 50);
+}
+
+/* ==========================================
+   架构图高亮
+========================================== */
+const ALL_NODES     = ['cloud', 'edge', 'terminal'];
+const ALL_ARROWCOLS = ['ce', 'et'];
+
+function setArchHighlight(cfg) {
+    ALL_NODES.forEach(n => {
+        const nodeEl = document.getElementById(`node-${n}`);
+        const iconEl = document.getElementById(`icon-${n}`);
+        iconEl.classList.remove('hl-distill', 'hl-lora');
+        if (cfg.nodes.includes(n)) {
+            nodeEl.classList.remove('dimmed');
+            iconEl.classList.add(`hl-${cfg.type}`);
+            // 脉冲
+            const pulse = document.getElementById(`pulse-${n}`);
+            if (pulse) pulse.classList.add('active');
+        } else {
+            nodeEl.classList.add('dimmed');
+            const pulse = document.getElementById(`pulse-${n}`);
+            if (pulse) pulse.classList.remove('active');
+        }
+    });
+    ALL_ARROWCOLS.forEach(col => {
+        const el = document.getElementById(`arrowcol-${col}`);
+        if (!el) return;
+        el.classList.toggle('dimmed', !cfg.arrowCols.includes(col));
+    });
+}
+
+function clearArchHighlight() {
+    ALL_NODES.forEach(n => {
+        document.getElementById(`node-${n}`).classList.remove('dimmed');
+        const iconEl = document.getElementById(`icon-${n}`);
+        iconEl.classList.remove('hl-distill', 'hl-lora');
+        const pulse = document.getElementById(`pulse-${n}`);
+        if (pulse) pulse.classList.remove('active');
+    });
+    ALL_ARROWCOLS.forEach(col => {
+        document.getElementById(`arrowcol-${col}`)?.classList.remove('dimmed');
+    });
+}
+
+function setArrowFlowing(id, on) {
+    document.getElementById(id)?.classList.toggle('flowing', on);
+}
+
+/* ==========================================
+   检查状态弹窗
+========================================== */
+function checkStatus(side) {
+    const names = { cloud: '云侧模型', edge: '边缘侧模型', terminal: '端侧模型' };
+    const name  = names[side];
+    const spec  = MODEL_SPECS[side];
+    addLog('sys', `正在检查 ${name} 在线状态...`);
+
+    const modal   = document.getElementById('statusModal');
+    const title   = document.getElementById('statusModalTitle');
+    const content = document.getElementById('statusModalContent');
+    title.textContent   = name + ' · 状态检查';
+    content.innerHTML   = '<div style="color:#bbb;font-size:14px;padding:14px 0;text-align:center;">正在连接...</div>';
+    modal.classList.add('show');
+
+    setTimeout(() => {
+        const online     = Math.random() > 0.12;
+        const ver        = `v${Math.floor(Math.random()*3)+1}.${Math.floor(Math.random()*9)}.${Math.floor(Math.random()*9)}`;
+        const lastUpdate = new Date(Date.now() - Math.random() * 14 * 86400000).toLocaleDateString();
+        const latency    = online ? Math.floor(Math.random() * 60 + 4) + ' ms' : '—';
+
+        let html = `
+            <div class="modal-info-row">
+                <span class="modal-info-label">在线状态</span>
+                <span class="modal-info-value ${online ? 'online' : 'offline'}">${online ? '● 在线' : '● 离线'}</span>
+            </div>
+            <div class="modal-info-row">
+                <span class="modal-info-label">当前版本</span>
+                <span class="modal-info-value">${ver}</span>
+            </div>
+            <div class="modal-info-row">
+                <span class="modal-info-label">网络延迟</span>
+                <span class="modal-info-value">${latency}</span>
+            </div>
+            <div class="modal-info-row">
+                <span class="modal-info-label">模型架构</span>
+                <span class="modal-info-value">${spec.arch}</span>
+            </div>
+            <div class="modal-info-row">
+                <span class="modal-info-label">参数量</span>
+                <span class="modal-info-value">${spec.params}</span>
+            </div>
+            <div class="modal-info-row">
+                <span class="modal-info-label">部署设备</span>
+                <span class="modal-info-value">${spec.device}</span>
+            </div>
+            <div class="modal-info-row">
+                <span class="modal-info-label">上次更新</span>
+                <span class="modal-info-value">${lastUpdate}</span>
+            </div>`;
+
+        // 操作历史
+        const hist = opHistory[side];
+        html += `<div class="modal-section-title">操作历史</div>`;
+        if (hist.length === 0) {
+            html += `<div class="history-empty">暂无操作记录</div>`;
+        } else {
+            [...hist].reverse().forEach(r => {
+                const cls = r.type === 'lora' ? 'lora-rec' : (r.action.includes('更新') ? 'update-rec' : 'distill-rec');
+                html += `
+                <div class="history-record ${cls}">
+                    <div class="rec-action">${r.action}</div>
+                    <div class="rec-sub">${r.time} · ${r.path || ''} · ${r.size || ''}</div>
+                </div>`;
+            });
+        }
+
+        content.innerHTML = html;
+        addLog('sys', `${name} 状态：${online ? '在线 ' + ver : '离线'}`, online ? 'success' : 'error');
+    }, 700 + Math.random() * 1000);
+}
+
+/* ==========================================
+   更新模型弹窗
+========================================== */
+function openUpdateModal(side) {
+    const names = { edge: '边缘侧模型', terminal: '端侧模型' };
+    const name  = names[side];
+    const modal   = document.getElementById('updateModal');
+    const title   = document.getElementById('updateModalTitle');
+    const content = document.getElementById('updateModalContent');
+    const closeBtn = document.getElementById('updateModalClose');
+
+    title.textContent = name + ' · 更新模型';
+    closeBtn.disabled = false;
+
+    const pending = pendingUpdates[side] || [];
+
+    if (pending.length === 0) {
+        content.innerHTML = `
+            <div style="text-align:center;padding:20px 0;">
+                <div style="font-size:32px;margin-bottom:12px;">📭</div>
+                <div style="font-size:15px;color:#666;font-weight:600;">尚未接收到可用的更新数据</div>
+                <div style="font-size:13px;color:#aaa;margin-top:6px;">请先在下方面板完成传输后再更新模型</div>
+            </div>`;
+    } else {
+        let html = `<div style="font-size:13px;color:#888;margin-bottom:14px;">以下数据已完成传输，可载入模型：</div>`;
+        pending.forEach(item => {
+            const isLora = item.type === 'lora';
+            const cls    = isLora ? 'lora-item' : 'distill-item';
+            const btnCls = isLora ? 'lora-apply' : 'distill-apply';
+            const typeLabel = isLora ? 'LoRA 参数' : '蒸馏数据';
+            html += `
+            <div class="update-item ${cls}" id="update-item-${item.id}">
+                <div class="update-item-info">
+                    <div class="item-title">${typeLabel} · ${item.version}</div>
+                    <div class="item-sub">${item.path} · ${item.size} · ${item.time}</div>
+                </div>
+                <button class="btn-apply ${btnCls}" onclick="applyUpdate('${side}', ${item.id})">
+                    应用更新
+                </button>
+            </div>`;
+        });
+        content.innerHTML = html;
+    }
+
+    modal.classList.add('show');
+}
+
+function applyUpdate(side, itemId) {
+    const pending = pendingUpdates[side];
+    const idx     = pending.findIndex(i => i.id === itemId);
+    if (idx === -1) return;
+    const item = pending[idx];
+
+    // 禁用所有应用按钮 + 关闭按钮
+    document.querySelectorAll('.btn-apply').forEach(b => b.disabled = true);
+    document.getElementById('updateModalClose').disabled = true;
+
+    const itemEl  = document.getElementById(`update-item-${itemId}`);
+    const content = document.getElementById('updateModalContent');
+    const isLora  = item.type === 'lora';
+
+    itemEl.innerHTML = `
+        <div style="width:100%;">
+            <div style="font-size:14px;font-weight:700;color:#333;margin-bottom:10px;">
+                正在载入 ${isLora ? 'LoRA 参数' : '蒸馏数据'}...
+            </div>
+            <div class="inline-progress">
+                <div class="inline-progress-bar">
+                    <div class="inline-progress-fill" id="apply-fill-${itemId}"></div>
+                </div>
+                <div class="inline-progress-text" id="apply-text-${itemId}">初始化...</div>
+            </div>
+        </div>`;
+
+    const steps = ['正在解析参数文件...', '载入模型层...', '应用权重更新...', '验证模型一致性...', '完成'];
+    let pct = 0;
+    const fillEl = document.getElementById(`apply-fill-${itemId}`);
+    const textEl = document.getElementById(`apply-text-${itemId}`);
+    const totalMs = 3000 + Math.random() * 2000;
+    const inc = 100 / (totalMs / 80);
+    let stepIdx = 0;
+
+    const iv = setInterval(() => {
+        pct = Math.min(pct + inc, 100);
+        fillEl.style.width = pct + '%';
+        const si = Math.min(Math.floor(pct / 25), steps.length - 1);
+        if (si !== stepIdx) { stepIdx = si; textEl.textContent = steps[si]; }
+
+        if (pct >= 100) {
+            clearInterval(iv);
+            const newVer = 'v' + (2 + Math.random()).toFixed(1) + '.' + Math.floor(Math.random() * 9);
+            itemEl.innerHTML = `
+                <div style="width:100%;text-align:center;padding:6px 0;">
+                    <div style="font-size:28px;margin-bottom:8px;">✅</div>
+                    <div style="font-size:15px;font-weight:700;color:#1a9b8a;">模型更新成功</div>
+                    <div style="font-size:13px;color:#999;margin-top:4px;">新版本: ${newVer} · ${new Date().toLocaleTimeString()}</div>
+                </div>`;
+
+            pending.splice(idx, 1);
+            const names = { edge: '边缘侧模型', terminal: '端侧模型' };
+            opHistory[side].push({
+                action: `应用模型更新 [${isLora ? 'LoRA' : '蒸馏'}]`,
+                type: item.type, path: item.path,
+                time: new Date().toLocaleString(), size: item.size, version: newVer
+            });
+            addLog(isLora ? 'lora' : 'distill', `${names[side]} 更新完成，新版本 ${newVer}`, 'success');
+            document.getElementById('updateModalClose').disabled = false;
+        }
+    }, 80);
+}
+
+/* ==========================================
+   弹窗通用
+========================================== */
+function closeModal(id) {
+    document.getElementById(id).classList.remove('show');
+}
+document.querySelectorAll('.modal-overlay').forEach(o => {
+    o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
+});
+
+/* ==========================================
+   日志
+========================================== */
+function addLog(type, msg, style) {
+    const body = document.getElementById('logBody');
+    const ts   = new Date().toLocaleTimeString();
+    const tagLabels = { sys: '系统', distill: '蒸馏', lora: 'LoRA' };
+    const tagLabel  = tagLabels[type] || type;
+    const msgClass  = style ? `log-msg ${style}` : `log-msg ${type !== 'sys' ? type : ''}`;
+
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.innerHTML = `
+        <span class="log-ts">[${ts}]</span>
+        <span class="log-tag ${type}">${tagLabel}</span>
+        <span class="${msgClass.trim()}">${msg}</span>`;
+    body.appendChild(entry);
+    body.scrollTop = body.scrollHeight;
+}
+
+/* ==========================================
+   初始化
+========================================== */
+selectDistillPath('cloud-edge');
+addLog('sys', '云边端协同传输展示平台已就绪');
+addLog('sys', '蒸馏数据传输（离线训练）· LoRA 参数传输（在线更新）均已就绪');
+addLog('distill', '蒸馏路径：云侧 → 边缘侧  /  边缘侧 → 端侧（可在左侧面板切换）');
+addLog('lora',    'LoRA 路径：边缘侧 → 端侧（固定）');
+</script>
+</body>
+</html>

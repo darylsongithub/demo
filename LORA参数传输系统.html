@@ -607,8 +607,8 @@ const pendingUpdates = { edge: [], terminal: [] };
 // 模型规格
 const MODEL_SPECS = {
     cloud:    { params: '≥ 30B',     device: 'A100 服务器',         arch: 'Qwen3-32B' },
-    edge:     { params: '2B ~ 10B',  device: 'RTX 5090 笔记本',         arch: 'Qwen3-7B'   },
-    terminal: { params: '< 2B',      device: 'UAV 搭载 NVIDIA Jetson',   arch: 'Qwen3-1.5B' }
+    edge:     { params: '2B ~ 10B',  device: 'RTX 5090 笔记本',         arch: 'Qwen3-8B'   },
+    terminal: { params: '< 2B',      device: 'UAV 搭载 NVIDIA Jetson',   arch: 'Qwen3-1.7B' }
 };
 
 /* ==========================================
@@ -678,8 +678,8 @@ function startDistill() {
     const arrowId = distillPath === 'cloud-edge' ? 'arrow-cloud-edge' : 'arrow-edge-terminal-d';
     setArrowFlowing(arrowId, true);
 
-    // 云侧→边缘侧: 100 Mbit/s = 12.5 MB/s；边缘侧→端侧: 64 Mbit/s = 8 MB/s
-    const baseSpeed = distillPath === 'cloud-edge' ? 12.5 : 8;
+    // 云侧→边缘侧: 6 MB/s；边缘侧→端侧: 12 MB/s
+    const baseSpeed = distillPath === 'cloud-edge' ? 6 : 12;
 
     runTransmission('distill', distillFileSize, baseSpeed, () => {
         distillTransmitting = false;
@@ -711,8 +711,8 @@ function startLora() {
     setArchHighlight({ nodes: ['edge', 'terminal'], arrowCols: ['et'], type: 'lora' });
     setArrowFlowing('arrow-edge-terminal-l', true);
 
-    // 边缘侧→端侧: 30 Mbit/s = 3.75 MB/s
-    const baseSpeed = 3.75;
+    // 边缘侧→端侧: 12 MB/s
+    const baseSpeed = 12;
 
     runTransmission('lora', loraFileSize, baseSpeed, () => {
         loraTransmitting = false;

@@ -189,6 +189,17 @@
         .drop-zone-text { font-size: 15px; color: #555; font-weight: 700; }
         .drop-zone-sub  { font-size: 13px; color: #aaa; margin-top: 3px; }
 
+        .distill-file-row {
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 12px; padding: 6px 8px; margin: 2px 0; border-radius: 6px;
+            cursor: pointer; color: #666; border: 1.5px solid transparent;
+        }
+        .distill-file-row:hover { background: #fff1e6; border-color: #f0c090; }
+        .distill-file-row.selected {
+            background: #fff1e6; border-color: #e07b39; color: #333;
+            box-shadow: 0 0 0 2px rgba(224,123,57,0.15);
+        }
+
         /* 进度区 */
         .progress-device-row {
             display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
@@ -406,7 +417,7 @@
                 <div class="node-label">边缘侧模型</div>
                 <div class="node-btns">
                     <button class="btn btn-check"   onclick="checkStatus('edge')">检查状态</button>
-                    <button class="btn btn-update"  onclick="openUpdateModal('edge')">更新模型</button>
+                    <button class="btn btn-update"  onclick="runEdgeUpdateModel()">更新模型</button>
                 </div>
             </div>
 
@@ -463,19 +474,19 @@
             </div>
 
             <div class="path-selector">
-                <div class="path-btn distill-theme active" id="dpath-ce" onclick="selectDistillPath('cloud-edge')">
-                    ☁️ 云侧 → 边缘侧
-                </div>
-                <div class="path-btn distill-theme" id="dpath-et" onclick="selectDistillPath('edge-terminal')">
-                    💻 边缘侧 → 端侧
+                <div class="path-btn distill-theme active fixed">
+                    💻 边缘侧 → 端侧（当前联调）
                 </div>
             </div>
 
-            <div class="drop-zone distill-zone" id="distillDrop">
-                <input type="file" id="distillFile" multiple onchange="handleDistillFiles(this.files)">
+            <div class="drop-zone distill-zone" id="distillDrop" style="cursor:default;">
                 <div class="drop-zone-icon">📂</div>
-                <div class="drop-zone-text">上传蒸馏数据包</div>
-                <div class="drop-zone-sub" id="distillFileInfo">点击选择或拖拽文件至此处（支持多文件）</div>
+                <div class="drop-zone-text">边缘侧数据目录文件</div>
+                <div id="distillRemoteDir" class="drop-zone-sub" style="margin-bottom:6px;">目录：—</div>
+                <div id="distillFileList" style="margin-top:8px;text-align:left;max-height:120px;overflow-y:auto;">
+                    <div style="color:#bbb;font-size:13px;text-align:center;">连接后端后刷新列表...</div>
+                </div>
+                <div id="distillSelectHint" class="drop-zone-sub" style="margin-top:6px;">点击一行选择要传输的文件</div>
             </div>
 
             <div class="progress-device-row">
@@ -592,48 +603,107 @@
 /* ==========================================
    全局状态
 ========================================== */
-let distillPath       = 'cloud-edge';
-let distillFileSize   = 0;
-let loraFileSize      = 0;
-let distillTransmitting = false;
-let loraTransmitting    = false;
-
-// 操作历史：每侧独立
-const opHistory = { cloud: [], edge: [], terminal: [] };
-
-// 待应用的更新数据（传输完成后入队，"更新模型"后出队）
-const pendingUpdates = { edge: [], terminal: [] };
-
-// 模型规格
-const MODEL_SPECS = {
-    cloud:    { params: '≥ 30B',     device: 'A100 服务器',         arch: 'Qwen3-32B' },
-    edge:     { params: '2B ~ 10B',  device: 'RTX 5090 笔记本',         arch: 'Qwen3-8B'   },
-    terminal: { params: '< 2B',      device: 'UAV 搭载 NVIDIA Jetson',   arch: 'Qwen3-1.7B' }
+// 边缘侧和端侧是两套平行后端；云侧暂未接入。
+const API = {
+    edge: 'http://10.20.3.35:8000',
+    terminal: 'http://10.31.10.208:8001'
 };
 
-/* ==========================================
-   路径切换
-========================================== */
-function selectDistillPath(path) {
-    distillPath = path;
-    document.getElementById('dpath-ce').classList.toggle('active', path === 'cloud-edge');
-    document.getElementById('dpath-et').classList.toggle('active', path === 'edge-terminal');
-    const label = path === 'cloud-edge' ? '边缘侧' : '端侧';
-    document.getElementById('distillDeviceLabel').textContent = label;
+// 蒸馏：当前仅边缘侧 → 端侧
+const distillPath = 'edge-terminal';
+let selectedDistillFile   = '';   // 选中的远端文件名
+let selectedDistillSizeMB = 0;
+let distillTotalMB        = 0;    // 列表总大小（展示用）
+
+let loraFileSize          = 0;
+let distillTransmitting   = false;
+let loraTransmitting      = false;
+
+const pendingUpdates = { edge: [], terminal: [] };
+
+let edgeRemoteFiles = [];
+
+document.getElementById('distillDeviceLabel').textContent = '端侧';
+
+async function loadEdgeRemoteFiles() {
+    const listEl = document.getElementById('distillFileList');
+    const dirEl  = document.getElementById('distillRemoteDir');
+    selectedDistillFile = '';
+    selectedDistillSizeMB = 0;
+    document.getElementById('distillStartBtn').disabled = true;
+    listEl.innerHTML = '<div style="color:#bbb;font-size:13px;text-align:center;">正在读取边缘侧文件目录...</div>';
+
+    try {
+        const resp = await fetch(`${API.edge}/api/edge/files`);
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(t || '读取失败');
+        }
+        const data = await resp.json();
+        dirEl.textContent = '远端目录：' + (data.remote_dir || '');
+        const files = data.files || [];
+
+        if (files.length === 0) {
+            edgeRemoteFiles = [];
+            listEl.innerHTML = '<div style="color:#bbb;font-size:13px;text-align:center;">目录为空</div>';
+            distillTotalMB = 0;
+            return;
+        }
+
+        distillTotalMB = files.reduce((s, f) => s + (f.size_mb || 0), 0);
+        edgeRemoteFiles = files.map(f => ({
+            name: f.name,
+            size_mb: typeof f.size_mb === 'number' ? f.size_mb : (Number(f.size_bytes || 0) / (1024 * 1024)),
+            size_bytes: Number(f.size_bytes || 0),
+        }));
+        const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        listEl.innerHTML = edgeRemoteFiles.map((f, i) =>
+            `<div class="distill-file-row" data-idx="${i}" onclick="selectDistillByIndex(${i})">
+                <span>📄 ${esc(f.name)}</span>
+                <span style="color:#e07b39;font-weight:700;">${f.size_mb.toFixed(2)} MB</span>
+            </div>`
+        ).join('');
+        addLog('distill', `边缘远端目录列出 ${files.length} 个文件，合计约 ${distillTotalMB.toFixed(2)} MB`);
+    } catch (e) {
+        edgeRemoteFiles = [];
+        dirEl.textContent = '远端目录：—';
+        listEl.innerHTML = '<div style="color:#f07070;font-size:13px;text-align:center;">⚠ ' + String(e.message || e).slice(0, 240) + '</div>';
+        addLog('distill', '读取边缘远端目录失败：' + String(e.message || e), 'error');
+    }
+}
+
+function selectDistillByIndex(idx) {
+    const f = edgeRemoteFiles[idx];
+    if (!f) return;
+    selectedDistillFile = f.name;
+    selectedDistillSizeMB = f.size_mb;
+    document.querySelectorAll('.distill-file-row').forEach(el => {
+        el.classList.toggle('selected', el.getAttribute('data-idx') === String(idx));
+    });
+    if (!distillTransmitting) document.getElementById('distillStartBtn').disabled = false;
+}
+
+async function runEdgeUpdateModel() {
+    addLog('sys', '正在请求边缘侧执行模拟模型更新…');
+    try {
+        const resp = await fetch(`${API.edge}/api/edge/update_model`, { method: 'POST' });
+        const text = await resp.text();
+        if (!resp.ok) throw new Error(text || ('HTTP ' + resp.status));
+        try {
+            const j = JSON.parse(text);
+            if (j.stdout) addLog('sys', String(j.stdout).trim().slice(0, 400));
+            if (j.stderr && String(j.stderr).trim()) addLog('sys', 'stderr: ' + String(j.stderr).trim().slice(0, 200));
+        } catch (_) { /* plain text detail */ }
+        addLog('sys', '边缘侧模拟更新已完成', 'success');
+        await loadEdgeRemoteFiles();
+    } catch (e) {
+        addLog('sys', '边缘侧更新失败：' + String(e.message || e).slice(0, 420), 'error');
+    }
 }
 
 /* ==========================================
-   文件处理
+   LoRA 文件处理（保留本地上传）
 ========================================== */
-function handleDistillFiles(files) {
-    if (!files.length) return;
-    distillFileSize = Array.from(files).reduce((s, f) => s + f.size, 0);
-    const mb = (distillFileSize / (1024 * 1024)).toFixed(2);
-    document.getElementById('distillFileInfo').textContent = `已选 ${files.length} 个文件，共 ${mb} MB`;
-    document.getElementById('distillStartBtn').disabled = false;
-    addLog('distill', `已选择蒸馏数据包：${files.length} 个文件，共 ${mb} MB`);
-}
-
 function handleLoraFiles(files) {
     if (!files.length) return;
     loraFileSize = Array.from(files).reduce((s, f) => s + f.size, 0);
@@ -643,45 +713,57 @@ function handleLoraFiles(files) {
     addLog('lora', `已选择 LoRA 参数文件：${files.length} 个文件，共 ${mb} MB`);
 }
 
-// 拖拽
-['distillDrop', 'loraDrop'].forEach((id, i) => {
-    const zone = document.getElementById(id);
-    const handler = i === 0 ? handleDistillFiles : handleLoraFiles;
-    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
-    zone.addEventListener('dragleave', ()  => zone.classList.remove('drag-over'));
-    zone.addEventListener('drop', e => {
-        e.preventDefault();
-        zone.classList.remove('drag-over');
-        handler(e.dataTransfer.files);
-    });
+// LoRA 拖拽
+const loraDrop = document.getElementById('loraDrop');
+loraDrop.addEventListener('dragover',  e => { e.preventDefault(); loraDrop.classList.add('drag-over'); });
+loraDrop.addEventListener('dragleave', ()  => loraDrop.classList.remove('drag-over'));
+loraDrop.addEventListener('drop', e => {
+    e.preventDefault();
+    loraDrop.classList.remove('drag-over');
+    handleLoraFiles(e.dataTransfer.files);
 });
 
 /* ==========================================
    传输启动
 ========================================== */
-function startDistill() {
+async function startDistill() {
     if (distillTransmitting) return;
+
+    const pathLabel = '边缘侧 → 端侧';
+    const sender   = 'edge';
+    const receiver = 'terminal';
+    const arrowId  = 'arrow-edge-terminal-d';
+
+    if (!selectedDistillFile) {
+        addLog('distill', '请先在列表中点击选择要传输的文件', 'error');
+        return;
+    }
+
+    let taskId = null;
+    try {
+        const resp = await fetch(`${API.edge}/api/transfer/edge-to-terminal/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: selectedDistillFile }),
+        });
+        const text = await resp.text();
+        if (!resp.ok) throw new Error(text || ('HTTP ' + resp.status));
+        const data = JSON.parse(text);
+        taskId = data.task_id;
+    } catch (e) {
+        addLog('distill', '后端启动失败，将离线模拟进度：' + String(e.message || e).slice(0, 200), 'error');
+    }
+
     distillTransmitting = true;
-
-    const pathLabels = { 'cloud-edge': '云侧 → 边缘侧', 'edge-terminal': '边缘侧 → 端侧' };
-    const pathLabel  = pathLabels[distillPath];
-    const sender     = distillPath === 'cloud-edge' ? 'cloud' : 'edge';
-    const receiver   = distillPath === 'cloud-edge' ? 'edge'  : 'terminal';
-
-    addLog('distill', `开始蒸馏数据传输 [${pathLabel}]`);
+    addLog('distill', `开始蒸馏数据传输 [${pathLabel}] 文件「${selectedDistillFile}」`);
     document.getElementById('distillStartBtn').disabled = true;
 
-    // 架构图高亮
-    setArchHighlight({ nodes: [sender, receiver], arrowCols: [distillPath === 'cloud-edge' ? 'ce' : 'et'], type: 'distill' });
-
-    // 箭头流动
-    const arrowId = distillPath === 'cloud-edge' ? 'arrow-cloud-edge' : 'arrow-edge-terminal-d';
+    setArchHighlight({ nodes: [sender, receiver], arrowCols: ['et'], type: 'distill' });
     setArrowFlowing(arrowId, true);
 
-    // 云侧→边缘侧: 6 MB/s；边缘侧→端侧: 12 MB/s
-    const baseSpeed = distillPath === 'cloud-edge' ? 6 : 12;
+    const doneTotalMB = selectedDistillSizeMB > 0 ? selectedDistillSizeMB : Math.max(distillTotalMB || 10, 0.01);
 
-    runTransmission('distill', distillFileSize, baseSpeed, () => {
+    const onDone = (totalMB) => {
         distillTransmitting = false;
         setArrowFlowing(arrowId, false);
         clearArchHighlight();
@@ -690,15 +772,19 @@ function startDistill() {
         const rec = {
             type: 'distill', path: pathLabel,
             time: new Date().toLocaleString(),
-            size: (distillFileSize / (1024 * 1024)).toFixed(2) + ' MB',
+            size: totalMB.toFixed(2) + ' MB',
             version: 'v' + (2 + Math.random()).toFixed(1) + '.' + Math.floor(Math.random() * 9)
         };
-        opHistory[sender].push({ action: '发起蒸馏传输', ...rec });
-        opHistory[receiver].push({ action: '接收蒸馏数据', ...rec });
         pendingUpdates[receiver].push({ ...rec, id: Date.now() });
+        document.getElementById('distillStartBtn').disabled = selectedDistillFile ? false : true;
+    };
 
-        document.getElementById('distillStartBtn').disabled = false;
-    });
+    if (taskId) {
+        listenSSEProgress('distill', arrowId, taskId, () => onDone(doneTotalMB));
+    } else {
+        const totalSize = Math.max(doneTotalMB, 0.01) * 1024 * 1024;
+        runSimulation('distill', totalSize, 12, () => onDone(doneTotalMB));
+    }
 }
 
 function startLora() {
@@ -711,10 +797,8 @@ function startLora() {
     setArchHighlight({ nodes: ['edge', 'terminal'], arrowCols: ['et'], type: 'lora' });
     setArrowFlowing('arrow-edge-terminal-l', true);
 
-    // 边缘侧→端侧: 12 MB/s
     const baseSpeed = 12;
-
-    runTransmission('lora', loraFileSize, baseSpeed, () => {
+    runSimulation('lora', loraFileSize, baseSpeed, () => {
         loraTransmitting = false;
         setArrowFlowing('arrow-edge-terminal-l', false);
         clearArchHighlight();
@@ -726,41 +810,87 @@ function startLora() {
             size: (loraFileSize / (1024 * 1024)).toFixed(2) + ' MB',
             version: 'LoRA-r' + [4, 8, 16, 32][Math.floor(Math.random() * 4)]
         };
-        opHistory.edge.push({ action: '发送 LoRA 参数', ...rec });
-        opHistory.terminal.push({ action: '接收 LoRA 参数', ...rec });
         pendingUpdates.terminal.push({ ...rec, id: Date.now() });
-
         document.getElementById('loraStartBtn').disabled = false;
     });
 }
 
 /* ==========================================
-   传输仿真核心
+   SSE 进度监听（后端模式）
 ========================================== */
-function runTransmission(type, totalSize, baseSpeedMBs, onDone) {
+function listenSSEProgress(type, arrowIdForErr, taskId, onDone) {
     const fillEl   = document.getElementById(`${type}-fill`);
     const statusEl = document.getElementById(`${type}-status`);
     const pctEl    = document.getElementById(`${type}-pct`);
-    const speedEl  = document.getElementById(type === 'distill' ? 'distillSpeed'      : 'loraSpeed');
-    const transEl  = document.getElementById(type === 'distill' ? 'distillTransferred' : 'loraTransferred');
-    const etaEl    = document.getElementById(type === 'distill' ? 'distillEta'         : 'loraEta');
+    const speedEl  = document.getElementById(type === 'distill' ? 'distillSpeed'       : 'loraSpeed');
+    const transEl  = document.getElementById(type === 'distill' ? 'distillTransferred'  : 'loraTransferred');
+    const etaEl    = document.getElementById(type === 'distill' ? 'distillEta'          : 'loraEta');
 
     fillEl.style.width   = '0%';
     statusEl.className   = 'progress-status-icon';
     statusEl.textContent = '·';
 
-    // 速率固定，时长由文件大小自适应
-    // 对极小文件（< 10MB）按 10MB 计算，保证动画至少有足够可见时间
-    const totalMB    = Math.max(totalSize / (1024 * 1024), 0.01);
-    const simMB      = Math.max(totalMB, 10);          // 用于计算时长的虚拟最低量
-    const durationMs = (simMB / baseSpeedMBs) * 1000;  // 时长 = 数据量 ÷ 速率
+    const es = new EventSource(`${API.edge}/api/transfer/stream/${taskId}`);
 
+    es.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+        fillEl.style.width  = d.pct + '%';
+        pctEl.textContent   = Math.round(d.pct) + '%';
+        speedEl.textContent = d.speed_mbps.toFixed(2) + ' MB/s';
+        transEl.textContent = d.transferred_mb.toFixed(2) + ' / ' + d.total_mb.toFixed(2) + ' MB';
+        etaEl.textContent   = d.eta_sec > 0 ? d.eta_sec + ' 秒' : '即将完成';
+
+        if (d.status === 'done') {
+            es.close();
+            statusEl.className   = 'progress-status-icon done';
+            statusEl.textContent = '✓';
+            etaEl.textContent    = '传输完成';
+            onDone();
+        } else if (d.status === 'error') {
+            es.close();
+            statusEl.className   = 'progress-status-icon error';
+            statusEl.textContent = '✗';
+            addLog('distill', `传输出错: ${d.error || '未知错误'}`, 'error');
+            document.getElementById('distillStartBtn').disabled = !!selectedDistillFile ? false : true;
+            distillTransmitting = false;
+            clearArchHighlight();
+            if (arrowIdForErr) setArrowFlowing(arrowIdForErr, false);
+        }
+    };
+
+    es.onerror = () => {
+        es.close();
+        addLog('distill', 'SSE 连接中断', 'error');
+        distillTransmitting = false;
+        document.getElementById('distillStartBtn').disabled = selectedDistillFile ? false : true;
+        clearArchHighlight();
+        if (arrowIdForErr) setArrowFlowing(arrowIdForErr, false);
+    };
+}
+
+/* ==========================================
+   本地仿真传输（离线降级 / LoRA 使用）
+========================================== */
+function runSimulation(type, totalSize, baseSpeedMBs, onDone) {
+    const fillEl   = document.getElementById(`${type}-fill`);
+    const statusEl = document.getElementById(`${type}-status`);
+    const pctEl    = document.getElementById(`${type}-pct`);
+    const speedEl  = document.getElementById(type === 'distill' ? 'distillSpeed'       : 'loraSpeed');
+    const transEl  = document.getElementById(type === 'distill' ? 'distillTransferred'  : 'loraTransferred');
+    const etaEl    = document.getElementById(type === 'distill' ? 'distillEta'          : 'loraEta');
+
+    fillEl.style.width   = '0%';
+    statusEl.className   = 'progress-status-icon';
+    statusEl.textContent = '·';
+
+    const totalMB    = Math.max(totalSize / (1024 * 1024), 0.01);
+    const simMB      = Math.max(totalMB, 10);
+    const durationMs = (simMB / baseSpeedMBs) * 1000;
     let progress     = 0;
-    let displaySpeed = baseSpeedMBs;   // 显示速率，每300ms轻微抖动，但基准不变
+    let displaySpeed = baseSpeedMBs;
     const inc        = 100 / (durationMs / 50);
     const startTime  = Date.now();
 
-    // 速率抖动：±10% 随机波动，视觉上模拟真实网络
     const fluctTimer = setInterval(() => {
         displaySpeed = baseSpeedMBs * (0.90 + Math.random() * 0.20);
     }, 300);
@@ -840,76 +970,113 @@ function setArrowFlowing(id, on) {
 }
 
 /* ==========================================
-   检查状态弹窗
+   检查状态弹窗（接入后端）
 ========================================== */
-function checkStatus(side) {
+async function checkStatus(side) {
     const names = { cloud: '云侧模型', edge: '边缘侧模型', terminal: '端侧模型' };
     const name  = names[side];
-    const spec  = MODEL_SPECS[side];
     addLog('sys', `正在检查 ${name} 在线状态...`);
 
     const modal   = document.getElementById('statusModal');
     const title   = document.getElementById('statusModalTitle');
     const content = document.getElementById('statusModalContent');
-    title.textContent   = name + ' · 状态检查';
-    content.innerHTML   = '<div style="color:#bbb;font-size:14px;padding:14px 0;text-align:center;">正在连接...</div>';
+    title.textContent = name + ' · 状态检查';
+    content.innerHTML = '<div style="color:#bbb;font-size:14px;padding:14px 0;text-align:center;">正在连接后端...</div>';
     modal.classList.add('show');
 
-    setTimeout(() => {
-        const online     = Math.random() > 0.12;
-        const ver        = `v${Math.floor(Math.random()*3)+1}.${Math.floor(Math.random()*9)}.${Math.floor(Math.random()*9)}`;
-        const lastUpdate = new Date(Date.now() - Math.random() * 14 * 86400000).toLocaleDateString();
-        const latency    = online ? Math.floor(Math.random() * 60 + 4) + ' ms' : '—';
+    let d;
+    const specs = {
+        cloud:    { arch: 'Qwen3-32B',  params: '≥ 30B',    device: '云侧暂未接入' },
+        edge:     { arch: 'Qwen3-8B',   params: '2B ~ 10B', device: 'Edge node 10.20.3.35' },
+        terminal: { arch: 'Qwen3-1.7B', params: '< 2B',     device: 'Terminal node 10.31.10.208' },
+    };
 
-        let html = `
-            <div class="modal-info-row">
-                <span class="modal-info-label">在线状态</span>
-                <span class="modal-info-value ${online ? 'online' : 'offline'}">${online ? '● 在线' : '● 离线'}</span>
-            </div>
-            <div class="modal-info-row">
-                <span class="modal-info-label">当前版本</span>
-                <span class="modal-info-value">${ver}</span>
-            </div>
-            <div class="modal-info-row">
-                <span class="modal-info-label">网络延迟</span>
-                <span class="modal-info-value">${latency}</span>
-            </div>
-            <div class="modal-info-row">
-                <span class="modal-info-label">模型架构</span>
-                <span class="modal-info-value">${spec.arch}</span>
-            </div>
-            <div class="modal-info-row">
-                <span class="modal-info-label">参数量</span>
-                <span class="modal-info-value">${spec.params}</span>
-            </div>
-            <div class="modal-info-row">
-                <span class="modal-info-label">部署设备</span>
-                <span class="modal-info-value">${spec.device}</span>
-            </div>
-            <div class="modal-info-row">
-                <span class="modal-info-label">上次更新</span>
-                <span class="modal-info-value">${lastUpdate}</span>
-            </div>`;
-
-        // 操作历史
-        const hist = opHistory[side];
-        html += `<div class="modal-section-title">操作历史</div>`;
-        if (hist.length === 0) {
-            html += `<div class="history-empty">暂无操作记录</div>`;
-        } else {
-            [...hist].reverse().forEach(r => {
-                const cls = r.type === 'lora' ? 'lora-rec' : (r.action.includes('更新') ? 'update-rec' : 'distill-rec');
-                html += `
-                <div class="history-record ${cls}">
-                    <div class="rec-action">${r.action}</div>
-                    <div class="rec-sub">${r.time} · ${r.path || ''} · ${r.size || ''}</div>
-                </div>`;
-            });
+    if (side === 'cloud') {
+        addLog('sys', '云侧暂未接入，显示离线状态');
+        d = {
+            online: false,
+            version: '暂未接入',
+            latency_ms: 0,
+            arch: specs.cloud.arch,
+            params: specs.cloud.params,
+            device: specs.cloud.device,
+            last_updated: '云侧暂未接入',
+            op_history: [],
+        };
+    } else {
+        try {
+            const statusUrl = side === 'edge'
+                ? `${API.edge}/api/status/edge`
+                : `${API.terminal}/api/status/terminal`;
+            const resp = await fetch(statusUrl);
+            if (!resp.ok) throw new Error('请求失败');
+            d = await resp.json();
+        } catch(e) {
+            addLog('sys', `${name} 后端未连接，使用离线模拟`, 'error');
+            const online = Math.random() > 0.12;
+            d = {
+                online,
+                version:      `v${Math.floor(Math.random()*3)+1}.${Math.floor(Math.random()*9)}.${Math.floor(Math.random()*9)}`,
+                latency_ms:   online ? Math.floor(Math.random() * 60 + 4) : 0,
+                arch:         specs[side].arch,
+                params:       specs[side].params,
+                device:       specs[side].device,
+                last_updated: '暂无记录（后端未连接）',
+                op_history:   [],
+            };
         }
+    }
 
-        content.innerHTML = html;
-        addLog('sys', `${name} 状态：${online ? '在线 ' + ver : '离线'}`, online ? 'success' : 'error');
-    }, 700 + Math.random() * 1000);
+    const online  = d.online;
+    const latency = online ? d.latency_ms + ' ms' : '—';
+
+    let html = `
+        <div class="modal-info-row">
+            <span class="modal-info-label">在线状态</span>
+            <span class="modal-info-value ${online ? 'online' : 'offline'}">${online ? '● 在线' : '● 离线'}</span>
+        </div>
+        <div class="modal-info-row">
+            <span class="modal-info-label">当前版本</span>
+            <span class="modal-info-value">${d.version}</span>
+        </div>
+        <div class="modal-info-row">
+            <span class="modal-info-label">网络延迟</span>
+            <span class="modal-info-value">${latency}</span>
+        </div>
+        <div class="modal-info-row">
+            <span class="modal-info-label">模型架构</span>
+            <span class="modal-info-value">${d.arch}</span>
+        </div>
+        <div class="modal-info-row">
+            <span class="modal-info-label">参数量</span>
+            <span class="modal-info-value">${d.params}</span>
+        </div>
+        <div class="modal-info-row">
+            <span class="modal-info-label">部署设备</span>
+            <span class="modal-info-value">${d.device}</span>
+        </div>
+        <div class="modal-info-row">
+            <span class="modal-info-label">上次更新</span>
+            <span class="modal-info-value">${d.last_updated}</span>
+        </div>`;
+
+    html += `<div class="modal-section-title">操作历史</div>`;
+    const hist = d.op_history || [];
+    if (hist.length === 0) {
+        html += `<div class="history-empty">暂无操作记录</div>`;
+    } else {
+        hist.forEach(r => {
+            const cls = r.type === 'lora' ? 'lora-rec' : (r.action.includes('更新') ? 'update-rec' : 'distill-rec');
+            html += `
+            <div class="history-record ${cls}">
+                <div class="rec-action">${r.action}</div>
+                <div class="rec-sub">${r.time} · ${r.path || ''} · ${r.size || ''}</div>
+            </div>`;
+        });
+    }
+
+    content.innerHTML = html;
+    addLog('sys', `${name} 状态：${online ? '在线 ' + d.version : '离线'}`, online ? 'success' : 'error');
 }
 
 /* ==========================================
@@ -965,13 +1132,11 @@ function applyUpdate(side, itemId) {
     if (idx === -1) return;
     const item = pending[idx];
 
-    // 禁用所有应用按钮 + 关闭按钮
     document.querySelectorAll('.btn-apply').forEach(b => b.disabled = true);
     document.getElementById('updateModalClose').disabled = true;
 
-    const itemEl  = document.getElementById(`update-item-${itemId}`);
-    const content = document.getElementById('updateModalContent');
-    const isLora  = item.type === 'lora';
+    const itemEl = document.getElementById(`update-item-${itemId}`);
+    const isLora = item.type === 'lora';
 
     itemEl.innerHTML = `
         <div style="width:100%;">
@@ -988,11 +1153,11 @@ function applyUpdate(side, itemId) {
 
     const steps = ['正在解析参数文件...', '载入模型层...', '应用权重更新...', '验证模型一致性...', '完成'];
     let pct = 0;
-    const fillEl = document.getElementById(`apply-fill-${itemId}`);
-    const textEl = document.getElementById(`apply-text-${itemId}`);
+    const fillEl  = document.getElementById(`apply-fill-${itemId}`);
+    const textEl  = document.getElementById(`apply-text-${itemId}`);
     const totalMs = 3000 + Math.random() * 2000;
-    const inc = 100 / (totalMs / 80);
-    let stepIdx = 0;
+    const inc     = 100 / (totalMs / 80);
+    let stepIdx   = 0;
 
     const iv = setInterval(() => {
         pct = Math.min(pct + inc, 100);
@@ -1002,7 +1167,9 @@ function applyUpdate(side, itemId) {
 
         if (pct >= 100) {
             clearInterval(iv);
-            const newVer = 'v' + (2 + Math.random()).toFixed(1) + '.' + Math.floor(Math.random() * 9);
+            const newVer  = 'v' + (2 + Math.random()).toFixed(1) + '.' + Math.floor(Math.random() * 9);
+            const nowTime = new Date().toLocaleString();
+
             itemEl.innerHTML = `
                 <div style="width:100%;text-align:center;padding:6px 0;">
                     <div style="font-size:28px;margin-bottom:8px;">✅</div>
@@ -1012,13 +1179,23 @@ function applyUpdate(side, itemId) {
 
             pending.splice(idx, 1);
             const names = { edge: '边缘侧模型', terminal: '端侧模型' };
-            opHistory[side].push({
-                action: `应用模型更新 [${isLora ? 'LoRA' : '蒸馏'}]`,
-                type: item.type, path: item.path,
-                time: new Date().toLocaleString(), size: item.size, version: newVer
-            });
             addLog(isLora ? 'lora' : 'distill', `${names[side]} 更新完成，新版本 ${newVer}`, 'success');
             document.getElementById('updateModalClose').disabled = false;
+
+            // 端侧应用更新历史写入端侧后端，保证"检查状态"可读取最近记录。
+            fetch(`${API.terminal}/api/update_history`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    side,
+                    type:    item.type,
+                    version: newVer,
+                    size:    item.size,
+                    path:    item.path,
+                    time:    nowTime,
+                    action:  `应用模型更新 [${isLora ? 'LoRA' : '蒸馏'}]`,
+                }),
+            }).catch(() => {/* 后端未连接时静默忽略 */});
         }
     }, 80);
 }
@@ -1056,11 +1233,12 @@ function addLog(type, msg, style) {
 /* ==========================================
    初始化
 ========================================== */
-selectDistillPath('cloud-edge');
 addLog('sys', '云边端协同传输展示平台已就绪');
-addLog('sys', '蒸馏数据传输（离线训练）· LoRA 参数传输（在线更新）均已就绪');
-addLog('distill', '蒸馏路径：云侧 → 边缘侧  /  边缘侧 → 端侧（可在左侧面板切换）');
+addLog('sys', `边缘侧后端：${API.edge}`);
+addLog('sys', `端侧后端：${API.terminal}`);
+addLog('distill', '蒸馏当前联调：边缘侧数据目录 → 端侧接收目录');
 addLog('lora',    'LoRA 路径：边缘侧 → 端侧（固定）');
+loadEdgeRemoteFiles();
 </script>
 </body>
 </html>
